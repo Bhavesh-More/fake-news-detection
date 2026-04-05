@@ -1,5 +1,6 @@
 import streamlit as st
-import time
+import threading
+import time as _time
 
 from pipeline.run_pipeline import invokePipeline
 
@@ -10,118 +11,142 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ─────────────────────────────────────────────
+#  EXAMPLE HEADLINES
+# ─────────────────────────────────────────────
+EXAMPLE_HEADLINES = [
+    ("Trusted source, factual claim", "Reuters confirms 5000 deaths in major earthquake", "reuters.com", 1200),
+    ("Trusted source, neutral claim",  "Central bank raises interest rates by 25 basis points", "apnews.com", 340),
+    ("Low credibility, sensationalist","SHOCKING: Secret cure exposed — you won't believe this one weird trick!", "unknown-news.site", 3),
+    ("Clickbait, unverified source",  "Breaking: Celebrity found secret underground bunker — see what happened next", "viralclick.net", 12),
+    ("Mixed signals",                 "Scientists discover that drinking coffee can cause memory loss", "healthdailynews.com", 89),
+]
+
+# ─────────────────────────────────────────────
+#  STYLE
+# ─────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap');
+
+:root {
+    --bg:       #080C18;
+    --surface:  rgba(255,255,255,0.025);
+    --border:   rgba(255,255,255,0.07);
+    --cyan:     #00C8FF;
+    --green:    #00E896;
+    --red:      #FF3366;
+    --text:     #E2E8F0;
+    --muted:    #475569;
+    --subtext:  #94A3B8;
+}
 
 *, *::before, *::after { box-sizing: border-box; }
 
-html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
-    background: #080C18 !important;
-    color: #E2E8F0 !important;
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"] {
+    background: var(--bg) !important;
+    color: var(--text) !important;
 }
 
 [data-testid="stAppViewContainer"] {
     background:
-        radial-gradient(ellipse 80% 50% at 20% -10%, rgba(0,200,255,0.06) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 80% 110%, rgba(255,51,102,0.05) 0%, transparent 55%),
-        #080C18 !important;
+        radial-gradient(ellipse 80% 50% at 15% -5%,  rgba(0,200,255,0.07) 0%, transparent 55%),
+        radial-gradient(ellipse 60% 40% at 85% 105%, rgba(255,51,102,0.05) 0%, transparent 50%),
+        var(--bg) !important;
 }
 
-[data-testid="stSidebar"] { display: none !important; }
-#MainMenu, footer, header { visibility: hidden !important; }
+[data-testid="stSidebar"],
+#MainMenu, footer, header,
 .stDeployButton { display: none !important; }
 
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: #0D1220; }
-::-webkit-scrollbar-thumb { background: #1E3A5F; border-radius: 2px; }
+::-webkit-scrollbar        { width: 4px; }
+::-webkit-scrollbar-track  { background: #0D1220; }
+::-webkit-scrollbar-thumb  { background: #1E3A5F; border-radius: 2px; }
 
-h1, h2, h3, h4, h5, h6 { font-family: 'Syne', sans-serif !important; }
-p, span, div, label, input, textarea, select, button { font-family: 'DM Sans', sans-serif !important; }
-code, pre, .mono { font-family: 'Space Mono', monospace !important; }
+/* typography */
+h1,h2,h3,h4,h5,h6  { font-family: 'Syne', sans-serif !important; }
+p,span,div,label   { font-family: 'DM Sans', sans-serif !important; }
+code,pre,.mono      { font-family: 'Space Mono', monospace !important; }
 
-/* ── block container reset ── */
-.block-container {
-    padding: 0 !important;
-    max-width: 100% !important;
-}
+/* columns padding */
+[data-testid="column"] { padding: 0 4px !important; }
+.stMarkdown             { margin: 0 !important; }
+[data-testid="stVerticalBlock"] > div { padding: 0 !important; }
 
-/* ── HERO HEADER ── */
+/* ── HEADER ── */
 .tn-header {
-    padding: 52px 24px 40px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    position: relative;
-    overflow: hidden;
-    margin-bottom: 0;
+    padding: 44px 24px 36px;
+    border-bottom: 1px solid var(--border);
     text-align: center;
+    position: relative;
 }
 .tn-header::before {
     content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
+    position: absolute; inset: 0;
     background: repeating-linear-gradient(
         0deg, transparent, transparent 39px,
-        rgba(255,255,255,0.015) 39px, rgba(255,255,255,0.015) 40px
+        rgba(255,255,255,0.012) 39px, rgba(255,255,255,0.012) 40px
     );
     pointer-events: none;
 }
-.tn-logo-row {
-    display: flex; align-items: center; justify-content: center;
-    gap: 16px; margin-bottom: 8px;
-}
+.tn-logo-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 6px; }
 .tn-logo-icon {
-    width: 44px; height: 44px;
-    background: linear-gradient(135deg, #00C8FF, #0066FF);
+    width: 42px; height: 42px;
+    background: linear-gradient(135deg, #0066FF, #00C8FF);
     border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 22px;
-    box-shadow: 0 0 24px rgba(0,200,255,0.3);
+    font-size: 20px;
+    box-shadow: 0 0 20px rgba(0,200,255,0.35);
     flex-shrink: 0;
 }
 .tn-brand {
     font-family: 'Syne', sans-serif !important;
-    font-size: 32px; font-weight: 800; letter-spacing: -0.5px;
+    font-size: 30px; font-weight: 800; letter-spacing: -0.5px;
     background: linear-gradient(90deg, #FFFFFF 0%, #7EB8D4 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 .tn-version {
     font-family: 'Space Mono', monospace !important;
-    font-size: 10px; color: #00C8FF;
-    background: rgba(0,200,255,0.08); border: 1px solid rgba(0,200,255,0.2);
-    padding: 3px 8px; border-radius: 4px; margin-left: 4px;
-    vertical-align: middle; letter-spacing: 1px;
+    font-size: 10px; color: var(--cyan);
+    background: rgba(0,200,255,0.08);
+    border: 1px solid rgba(0,200,255,0.2);
+    padding: 3px 8px; border-radius: 4px; margin-left: 2px;
+    letter-spacing: 1px; vertical-align: middle;
 }
 .tn-tagline {
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 14px; color: #64748B; margin-top: 4px; letter-spacing: 0.3px;
+    font-size: 13px; color: #64748B; margin-top: 6px; letter-spacing: 0.2px;
 }
 
-/* ── SECTION LABELS ── */
+/* ── SECTION LABEL ── */
 .tn-section-label {
     font-family: 'Space Mono', monospace !important;
-    font-size: 10px; letter-spacing: 2px; color: #475569;
-    text-transform: uppercase; margin-bottom: 16px;
+    font-size: 9px; letter-spacing: 2.5px; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 14px;
     display: flex; align-items: center; gap: 10px;
 }
-.tn-section-label::after {
-    content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.06);
+.tn-section-label::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.05); }
+
+/* ── INPUT CARD ── */
+.tn-input-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px 28px; margin-bottom: 18px;
+}
+.input-label {
+    font-size: 11px; font-weight: 500; color: var(--subtext);
+    letter-spacing: 0.5px; margin-bottom: 8px;
 }
 
-/* ── INPUT BLOCK ── */
-.tn-input-block {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 16px; padding: 28px; margin-bottom: 20px;
-}
-
-/* Streamlit input overrides */
+/* streamlit overrides */
 [data-testid="stTextArea"] textarea,
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input {
     background: rgba(255,255,255,0.04) !important;
     border: 1px solid rgba(255,255,255,0.08) !important;
     border-radius: 10px !important;
-    color: #E2E8F0 !important;
+    color: var(--text) !important;
     font-family: 'DM Sans', sans-serif !important;
     font-size: 14px !important;
     transition: border-color 0.2s, box-shadow 0.2s !important;
@@ -129,7 +154,7 @@ code, pre, .mono { font-family: 'Space Mono', monospace !important; }
 [data-testid="stTextArea"] textarea:focus,
 [data-testid="stTextInput"] input:focus,
 [data-testid="stNumberInput"] input:focus {
-    border-color: rgba(0,200,255,0.4) !important;
+    border-color: rgba(0,200,255,0.45) !important;
     box-shadow: 0 0 0 3px rgba(0,200,255,0.08) !important;
     outline: none !important;
 }
@@ -137,315 +162,410 @@ code, pre, .mono { font-family: 'Space Mono', monospace !important; }
 [data-testid="stTextInput"] label,
 [data-testid="stNumberInput"] label {
     font-family: 'DM Sans', sans-serif !important;
-    font-size: 12px !important; font-weight: 500 !important;
-    color: #94A3B8 !important; letter-spacing: 0.4px !important;
+    font-size: 11px !important; font-weight: 500 !important;
+    color: var(--subtext) !important; letter-spacing: 0.4px !important;
 }
 
-/* ── BUTTON ── */
-[data-testid="stButton"] > button {
+/* ── BUTTONS ── */
+.btn-primary[data-testid="stButton"] > button {
     background: linear-gradient(135deg, #0066FF 0%, #00C8FF 100%) !important;
-    color: #FFFFFF !important; border: none !important;
+    color: #fff !important; border: none !important;
     border-radius: 10px !important;
-    font-family: 'Syne', sans-serif !important;
-    font-weight: 700 !important; font-size: 14px !important;
-    letter-spacing: 0.5px !important; padding: 14px 28px !important;
-    width: 100% !important; cursor: pointer !important;
-    transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s !important;
+    font-family: 'Syne', sans-serif !important; font-weight: 700 !important;
+    font-size: 14px !important; letter-spacing: 0.5px !important;
+    padding: 13px 28px !important; width: 100% !important;
+    cursor: pointer !important;
     box-shadow: 0 4px 20px rgba(0,102,255,0.3) !important;
+    transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s !important;
 }
-[data-testid="stButton"] > button:hover {
-    opacity: 0.92 !important; transform: translateY(-1px) !important;
+.btn-primary[data-testid="stButton"] > button:hover {
+    opacity: 0.9 !important; transform: translateY(-1px) !important;
     box-shadow: 0 6px 28px rgba(0,102,255,0.45) !important;
 }
 
-/* ── PIPELINE ── */
-.pipeline-wrap {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 16px; padding: 28px; margin-bottom: 20px;
+.btn-ghost[data-testid="stButton"] > button {
+    background: transparent !important; color: var(--subtext) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 12px !important; font-weight: 500 !important;
+    padding: 8px 16px !important;
+    cursor: pointer !important;
+    transition: border-color 0.2s, color 0.2s !important;
 }
-.pipeline-running-label {
-    font-family: 'Space Mono', monospace !important;
-    font-size: 10px; letter-spacing: 2px; color: #00C8FF;
-    text-transform: uppercase; margin-bottom: 20px;
+.btn-ghost[data-testid="stButton"] > button:hover {
+    border-color: rgba(0,200,255,0.3) !important;
+    color: var(--cyan) !important;
 }
-.blink {
-    display: inline-block; width: 6px; height: 6px;
-    border-radius: 50%; background: #00C8FF;
-    animation: blink 1s ease-in-out infinite;
-    margin-right: 6px; vertical-align: middle;
-}
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.15} }
 
-.pipeline-track { display: flex; flex-direction: column; gap: 0; position: relative; }
-.pipeline-track::before {
-    content: ''; position: absolute; left: 17px; top: 20px; bottom: 20px;
+/* ── EXAMPLE PILLS ── */
+.examples-label {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 9px; letter-spacing: 2px; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 10px;
+}
+.example-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 20px; padding: 5px 12px;
+    font-size: 11px; color: var(--subtext);
+    cursor: pointer; margin: 3px;
+    transition: border-color 0.15s, color 0.15s;
+}
+.example-pill:hover { border-color: rgba(0,200,255,0.3); color: var(--cyan); }
+
+/* ── PIPELINE ── */
+.tn-pipeline {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px 28px; margin-bottom: 18px;
+}
+.tn-pipeline-header {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 9px; letter-spacing: 2.5px; color: var(--cyan);
+    text-transform: uppercase; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 8px;
+}
+.blink-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--cyan);
+    animation: blink 1s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.1} }
+
+.tn-pipeline-track {
+    display: flex; flex-direction: column; gap: 0;
+    position: relative;
+}
+.tn-pipeline-track::before {
+    content: ''; position: absolute; left: 15px; top: 18px; bottom: 18px;
     width: 1px;
-    background: linear-gradient(to bottom, rgba(0,200,255,0.25), rgba(255,51,102,0.25));
+    background: linear-gradient(to bottom, rgba(0,200,255,0.2), rgba(255,51,102,0.2));
 }
-.pipeline-step {
-    display: flex; align-items: center; gap: 16px;
-    padding: 11px 0; position: relative;
-}
-.step-dot {
-    width: 34px; height: 34px; border-radius: 50%; background: #0D1220;
-    border: 2px solid rgba(255,255,255,0.08);
+.tn-step { display: flex; align-items: center; gap: 14px; padding: 9px 0; }
+.tn-step-dot {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #0D1220; border: 2px solid rgba(255,255,255,0.07);
     display: flex; align-items: center; justify-content: center;
-    font-size: 13px; flex-shrink: 0; position: relative; z-index: 1; transition: all 0.3s;
+    font-size: 12px; flex-shrink: 0; position: relative; z-index: 1;
 }
-.step-dot.active {
-    border-color: #00C8FF; background: rgba(0,200,255,0.08);
-    animation: pulse-ring 1.2s ease-in-out infinite;
+.tn-step-dot.done   { border-color: var(--green); background: rgba(0,232,150,0.08); }
+.tn-step-dot.active {
+    border-color: var(--cyan); background: rgba(0,200,255,0.1);
+    animation: pulse-step 1.2s ease-in-out infinite;
 }
-@keyframes pulse-ring {
-    0%,100%{ box-shadow: 0 0 8px rgba(0,200,255,0.3); }
-    50%    { box-shadow: 0 0 22px rgba(0,200,255,0.7); }
+@keyframes pulse-step {
+    0%,100%{ box-shadow: 0 0 6px rgba(0,200,255,0.3); }
+    50%    { box-shadow: 0 0 20px rgba(0,200,255,0.65); }
 }
-.step-dot.done   { border-color: #00E896; background: rgba(0,232,150,0.08); }
-.step-dot.pending { opacity: 0.25; }
-.step-info { flex: 1; }
-.step-name { font-family: 'DM Sans', sans-serif !important; font-size: 13px; font-weight: 500; color: #94A3B8; }
-.step-name.active-name { color: #00C8FF; }
-.step-name.done-name   { color: #CBD5E1; }
-.step-status { font-family: 'Space Mono', monospace !important; font-size: 9px; letter-spacing: 1px; flex-shrink: 0; }
-.step-status.done-label   { color: #00E896; }
-.step-status.active-label { color: #00C8FF; }
+.tn-step-dot.pending { opacity: 0.2; }
+.tn-step-name {
+    font-size: 12px; font-weight: 500; color: var(--subtext);
+    transition: color 0.2s;
+}
+.tn-step-name.done   { color: var(--subtext); }
+.tn-step-name.active { color: var(--cyan); }
+.tn-step-label {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 8px; letter-spacing: 1px; margin-left: auto;
+}
+.tn-step-label.done   { color: var(--green); }
+.tn-step-label.active { color: var(--cyan); }
 
 /* ── VERDICT CARD ── */
-.verdict-card {
-    border-radius: 16px; padding: 28px; margin-bottom: 20px;
+.tn-verdict {
+    border-radius: 16px; padding: 26px 28px; margin-bottom: 18px;
     position: relative; overflow: hidden;
 }
-.verdict-real { background: rgba(0,232,150,0.06);  border: 1px solid rgba(0,232,150,0.2); }
-.verdict-fake { background: rgba(255,51,102,0.06); border: 1px solid rgba(255,51,102,0.2); }
-.verdict-card::before {
-    content: ''; position: absolute; top: -40px; right: -40px;
-    width: 140px; height: 140px; border-radius: 50%; opacity: 0.07;
+.tn-verdict.real { background: rgba(0,232,150,0.05); border: 1px solid rgba(0,232,150,0.18); }
+.tn-verdict.fake { background: rgba(255,51,102,0.05); border: 1px solid rgba(255,51,102,0.18); }
+.tn-verdict::before {
+    content: ''; position: absolute; top: -36px; right: -36px;
+    width: 130px; height: 130px; border-radius: 50%; opacity: 0.06;
 }
-.verdict-real::before { background: #00E896; }
-.verdict-fake::before { background: #FF3366; }
-.verdict-inner { display: flex; align-items: center; gap: 24px; }
-.verdict-text-block { flex: 1; }
-.verdict-label { font-family:'Space Mono',monospace !important; font-size:10px; letter-spacing:2px; margin-bottom:6px; }
-.verdict-label.real { color: #00E896; }
-.verdict-label.fake { color: #FF3366; }
-.verdict-title { font-family:'Syne',sans-serif !important; font-size:38px; font-weight:800; letter-spacing:-1px; line-height:1; margin-bottom:4px; }
-.verdict-title.real { color: #00E896; }
-.verdict-title.fake { color: #FF3366; }
-.verdict-subtitle { font-family:'DM Sans',sans-serif !important; font-size:13px; color:#64748B; margin-top:8px; }
+.tn-verdict.real::before { background: var(--green); }
+.tn-verdict.fake::before  { background: var(--red); }
+.tn-verdict-inner { display: flex; align-items: center; gap: 20px; }
+.tn-verdict-text  { flex: 1; }
+.tn-verdict-eyebrow {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 9px; letter-spacing: 2.5px; margin-bottom: 6px;
+}
+.tn-verdict-eyebrow.real { color: var(--green); }
+.tn-verdict-eyebrow.fake { color: var(--red); }
+.tn-verdict-title {
+    font-family: 'Syne', sans-serif !important;
+    font-size: 34px; font-weight: 800; letter-spacing: -1px;
+    line-height: 1; margin-bottom: 6px;
+}
+.tn-verdict-title.real { color: var(--green); }
+.tn-verdict-title.fake { color: var(--red); }
+.tn-verdict-sub {
+    font-size: 12px; color: var(--subtext); margin-top: 4px;
+}
 
-/* ── TWO-COL PANELS ── */
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-.two-col-panel {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 12px; padding: 18px;
+/* ── PROBABILITY RING ── */
+.ring-wrap { text-align: right; flex-shrink: 0; }
+.ring-pct {
+    font-family: 'Syne', sans-serif !important;
+    font-size: 13px; font-weight: 800; margin-top: 5px;
 }
 
-/* ── PROB BARS ── */
-.prob-bar-wrap { margin: 12px 0; }
-.prob-bar-label {
-    display: flex; justify-content: space-between; margin-bottom: 6px;
-    font-family: 'Space Mono', monospace !important; font-size: 11px;
+/* ── TWO COL PANELS ── */
+.tn-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+.tn-panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px;
 }
-.prob-bar-bg { height: 6px; background: rgba(255,255,255,0.06); border-radius: 99px; overflow: hidden; }
-.prob-bar-fill { height: 100%; border-radius: 99px; }
-.prob-bar-fill.real { background: linear-gradient(90deg, #00C896, #00E896); }
-.prob-bar-fill.fake { background: linear-gradient(90deg, #FF1A4F, #FF3366); }
+.panel-label {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 8px; letter-spacing: 2px; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 14px;
+}
+
+/* prob bars */
+.prob-row { margin: 10px 0; }
+.prob-row-head {
+    display: flex; justify-content: space-between; margin-bottom: 5px;
+    font-family: 'Space Mono', monospace !important; font-size: 10px;
+}
+.prob-bar-bg {
+    height: 5px; background: rgba(255,255,255,0.05);
+    border-radius: 99px; overflow: hidden;
+}
+.prob-bar-fill { height: 100%; border-radius: 99px; transition: width 0.6s ease; }
+.prob-bar-fill.real { background: linear-gradient(90deg, #00C896, var(--green)); }
+.prob-bar-fill.fake { background: linear-gradient(90deg, #FF1A4F, var(--red)); }
+
+/* model breakdown rows */
+.model-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+.model-row + .model-row { border-top: 1px solid rgba(255,255,255,0.04); }
+.model-key { font-family: 'Space Mono', monospace !important; font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+.model-val { font-family: 'Syne', sans-serif !important; font-size: 22px; font-weight: 700; }
 
 /* ── SIGNAL CHIPS ── */
-.signal-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 20px; }
-.signal-chip {
-    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px; padding: 14px 12px;
+.tn-chips { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 18px; }
+.tn-chip {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px;
 }
-.signal-chip-name {
-    font-family: 'Space Mono', monospace !important; font-size: 8px;
-    letter-spacing: 1.2px; color: #475569; text-transform: uppercase; margin-bottom: 8px;
+.tn-chip-name {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 7px; letter-spacing: 1.5px; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 10px;
 }
-.signal-chip-bar { height: 3px; background: rgba(255,255,255,0.05); border-radius: 99px; margin-bottom: 8px; overflow: hidden; }
-.signal-chip-fill { height: 100%; border-radius: 99px; }
-.signal-chip-val { font-family: 'Syne', sans-serif !important; font-size: 18px; font-weight: 700; }
+.tn-chip-bar { height: 3px; background: rgba(255,255,255,0.05); border-radius: 99px; margin-bottom: 8px; overflow: hidden; }
+.tn-chip-fill { height: 100%; border-radius: 99px; }
+.tn-chip-val { font-family: 'Syne', sans-serif !important; font-size: 16px; font-weight: 700; }
 
 /* ── EVIDENCE ── */
-.evidence-card { border-radius: 10px; padding: 16px; margin-bottom: 10px; border: 1px solid; }
-.evidence-card.support    { background: rgba(0,232,150,0.04);  border-color: rgba(0,232,150,0.15); }
-.evidence-card.contradict { background: rgba(255,51,102,0.04); border-color: rgba(255,51,102,0.15); }
-.evidence-card-tag {
-    font-family: 'Space Mono', monospace !important; font-size: 9px; letter-spacing: 1.5px;
-    padding: 3px 8px; border-radius: 4px; display: inline-block;
-    margin-bottom: 10px; text-transform: uppercase;
+.tn-evidence { margin-bottom: 14px; }
+.ev-card { border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; border: 1px solid; }
+.ev-card.support    { background: rgba(0,232,150,0.04);  border-color: rgba(0,232,150,0.14); }
+.ev-card.contradict { background: rgba(255,51,102,0.04); border-color: rgba(255,51,102,0.14); }
+.ev-tag {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 8px; letter-spacing: 1.5px; padding: 2px 7px;
+    border-radius: 3px; display: inline-block; margin-bottom: 8px;
+    text-transform: uppercase;
 }
-.evidence-card.support .evidence-card-tag    { background: rgba(0,232,150,0.15);  color: #00E896; }
-.evidence-card.contradict .evidence-card-tag { background: rgba(255,51,102,0.15); color: #FF3366; }
-.evidence-card-source {
-    font-family: 'Space Mono', monospace !important; font-size: 10px; color: #64748B;
-    margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+.ev-tag.support    { background: rgba(0,232,150,0.14); color: var(--green); }
+.ev-tag.contradict { background: rgba(255,51,102,0.14); color: var(--red); }
+.ev-source {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 9px; color: var(--muted); margin-bottom: 5px;
+    display: flex; align-items: center; gap: 5px;
 }
-.evidence-card-source::before { content: '⬡'; font-size: 8px; }
-.evidence-card-text { font-family: 'DM Sans', sans-serif !important; font-size: 13px; color: #94A3B8; line-height: 1.6; }
+.ev-source::before { content: '⬡'; font-size: 7px; }
+.ev-text { font-size: 12px; color: var(--subtext); line-height: 1.6; }
 
 /* ── QUERY BADGE ── */
-.query-badge {
+.tn-query {
     display: flex; align-items: flex-start; gap: 12px;
-    background: rgba(0,102,255,0.06); border: 1px solid rgba(0,102,255,0.2);
-    border-radius: 10px; padding: 14px 16px; margin-bottom: 20px;
+    background: rgba(0,102,255,0.05); border: 1px solid rgba(0,102,255,0.18);
+    border-radius: 10px; padding: 13px 16px; margin-bottom: 18px;
 }
-.query-badge-label {
-    font-family: 'Space Mono', monospace !important; font-size: 9px;
-    letter-spacing: 1.5px; color: #4A90E2; text-transform: uppercase; margin-bottom: 5px;
+.tn-query-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+.tn-query-label {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 8px; letter-spacing: 1.5px; color: #4A90E2;
+    text-transform: uppercase; margin-bottom: 4px;
 }
-.query-badge-text { font-family: 'DM Sans', sans-serif !important; font-size: 13px; color: #CBD5E1; font-style: italic; }
+.tn-query-text { font-size: 12px; color: var(--subtext); font-style: italic; }
 
 /* ── RECENT ── */
-.recent-item {
-    display: flex; align-items: center; gap: 12px; padding: 11px 14px;
-    border-radius: 8px; margin-bottom: 8px;
-    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
+.tn-recent-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 8px; margin-bottom: 6px;
+    background: var(--surface); border: 1px solid var(--border);
 }
-.recent-badge { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.recent-badge.real { background: #00E896; }
-.recent-badge.fake { background: #FF3366; }
-.recent-headline {
-    font-family: 'DM Sans', sans-serif !important; font-size: 12px; color: #64748B;
-    flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.tn-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.tn-dot.real { background: var(--green); }
+.tn-dot.fake { background: var(--red); }
+.tn-recent-hl {
+    font-size: 11px; color: var(--muted); flex: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.recent-prob { font-family: 'Space Mono', monospace !important; font-size: 10px; flex-shrink: 0; }
-.recent-prob.real { color: #00E896; }
-.recent-prob.fake { color: #FF3366; }
+.tn-recent-pct { font-family: 'Space Mono', monospace !important; font-size: 9px; flex-shrink: 0; }
+.tn-recent-pct.real { color: var(--green); }
+.tn-recent-pct.fake { color: var(--red); }
 
 /* ── DIVIDER ── */
-.tn-divider { height: 1px; background: rgba(255,255,255,0.05); margin: 24px 0; }
+.tn-divider { height: 1px; background: rgba(255,255,255,0.04); margin: 22px 0; }
 
-/* ── STREAMLIT OVERRIDES ── */
-[data-testid="column"] { padding: 0 !important; }
-.stMarkdown { margin: 0 !important; }
-[data-testid="stVerticalBlock"] > div { padding: 0 !important; }
-section[data-testid="stSidebar"] { display: none; }
+/* ── SPINNER ── */
 [data-testid="stSpinner"] > div {
     border-color: rgba(0,200,255,0.2) !important;
-    border-top-color: #00C8FF !important;
+    border-top-color: var(--cyan) !important;
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 640px) {
+    .tn-chips   { grid-template-columns: repeat(2,1fr) !important; }
+    .tn-two-col { grid-template-columns: 1fr !important; }
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ── SESSION STATE ──
-if "result" not in st.session_state:
-    st.session_state.result = None
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-# ── ANALYSIS ENGINE ──
-def _clamp01(value, default=0.0):
-    try:
-        return max(0.0, min(1.0, float(value)))
-    except (TypeError, ValueError):
-        return default
+# ─────────────────────────────────────────────
+#  HELPERS
+# ─────────────────────────────────────────────
+def _clamp(v, lo=0.0, hi=1.0, default=0.5):
+    try: return max(lo, min(hi, float(v)))
+    except: return default
 
 
+def ring_svg(pct, color, size=68):
+    r = 24; circ = 2 * 3.14159 * r
+    filled = circ * pct; gap = circ - filled
+    lbl = f"{round(pct*100)}%"
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 68 68">'
+        f'<circle cx="34" cy="34" r="{r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="6"/>'
+        f'<circle cx="34" cy="34" r="{r}" fill="none" stroke="{color}" stroke-width="6" '
+        f'stroke-dasharray="{filled:.1f} {gap:.1f}" stroke-dashoffset="{circ/4:.1f}" stroke-linecap="round"'
+        f' transform="rotate(-90 34 34)"/>'
+        f'<text x="34" y="34" dominant-baseline="central" text-anchor="middle" '
+        f'fill="{color}" font-size="10" font-weight="800" font-family="Syne,sans-serif">{lbl}</text>'
+        f'</svg>'
+    )
+
+
+PIPELINE_STEPS = [
+    ("🧬", "Semantic Embedding"),
+    ("📡", "Signal Extraction"),
+    ("🤖", "XGBoost + Bayesian Net"),
+    ("🔎", "LLM Query Generation"),
+    ("🌐", "Web Search"),
+    ("📋", "Evidence Synthesis"),
+]
+
+
+def pipeline_html(current_step, total_steps):
+    """0 = idle/header shown, 1..N = step index being highlighted, N+1 = all done"""
+    done = current_step >= total_steps
+    html = '<div class="tn-pipeline">'
+    html += '<div class="tn-pipeline-header">'
+    html += f'<span class="blink-dot"></span>{"Analysis complete" if done else "Running analysis"}'
+    html += '</div>'
+    html += '<div class="tn-pipeline-track">'
+    for i, (icon, name) in enumerate(PIPELINE_STEPS):
+        if i < current_step or done:
+            dot_cls = "done";   name_cls = "done";   lbl = "✓ done";   lbl_cls = "done"
+        elif i == current_step:
+            dot_cls = "active"; name_cls = "active"; lbl = "● running"; lbl_cls = "active"
+        else:
+            dot_cls = "pending"; name_cls = "";       lbl = "";          lbl_cls = ""
+        html += (
+            f'<div class="tn-step">'
+            f'<div class="tn-step-dot {dot_cls}">{icon}</div>'
+            f'<span class="tn-step-name {name_cls}">{name}</span>'
+            f'<span class="tn-step-label {lbl_cls}">{lbl}</span>'
+            f'</div>'
+        )
+    html += '</div></div>'
+    return html
+
+
+# ─────────────────────────────────────────────
+#  SESSION STATE
+# ─────────────────────────────────────────────
+for _k, _v in [
+    ("result", None),
+    ("history", []),
+    ("ex_selected", None),
+    ("run_step", 0),
+    ("run_done", False),
+    ("run_result", None),
+    ("run_error", None),
+]:
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+# ─────────────────────────────────────────────
+#  ANALYSIS ENGINE
+# ─────────────────────────────────────────────
 def run_analysis(headline, source, tweet_count):
     backend = invokePipeline(
         title=headline,
         domain_url=source,
         tweet_count=tweet_count,
     )
-
     support = backend.get("support", {})
     verdict = support.get("label", "REAL")
-    prob_real = _clamp01(support.get("prob_real", 0.5), default=0.5)
-    model_signals = support.get("model_signals", {})
+    prob_real = _clamp(support.get("prob_real", 0.5))
 
-    sentiment = _clamp01((float(model_signals.get("sentiment_score", 0.0)) + 1.0) / 2.0, default=0.5)
-    clickbait_raw = float(model_signals.get("clickbait_score", 0.0))
-    clickbait = _clamp01(clickbait_raw / 5.0, default=0.0)
-    source_credibility = _clamp01(model_signals.get("credibility_score", 0.5), default=0.5)
-    viral_index = _clamp01(float(model_signals.get("tweet_count", tweet_count)) / 20000.0, default=0.0)
+    ms = support.get("model_signals", {})
 
-    search_results = support.get("search_results", [])
-    evidence_type = "support" if verdict == "REAL" else "contradict"
+    sentiment      = _clamp((float(ms.get("sentiment_score", 0)) + 1.0) / 2.0)
+    clickbait_raw  = float(ms.get("clickbait_score", 0))
+    clickbait      = _clamp(clickbait_raw / 5.0)
+    credibility    = _clamp(ms.get("credibility_score", 0.5))
+    viral          = _clamp(float(ms.get("tweet_count", tweet_count)) / 20000.0)
+
+    # evidence
     evidence = []
-    for item in search_results[:5]:
-        evidence.append(
-            {
-                "type": evidence_type,
-                "source": item.get("title") or item.get("link") or "Web source",
-                "text": item.get("snippet") or "No snippet available for this result.",
-            }
-        )
-
+    for item in support.get("search_results", [])[:5]:
+        evidence.append({
+            "type":   "support" if verdict == "REAL" else "contradict",
+            "source": item.get("title") or item.get("link") or "Web",
+            "text":   item.get("snippet") or "No snippet available.",
+        })
     reason = support.get("reason", "")
     if reason:
-        evidence.append(
-            {
-                "type": evidence_type,
-                "source": "Model reasoning",
-                "text": reason,
-            }
-        )
-
+        evidence.append({"type": evidence[0]["type"] if evidence else "support",
+                         "source": "Model reasoning", "text": reason})
     if not evidence:
-        evidence.append(
-            {
-                "type": evidence_type,
-                "source": "Pipeline",
-                "text": "No external evidence results were returned.",
-            }
-        )
+        evidence.append({"type": "support", "source": "Pipeline",
+                         "text": "No external evidence returned."})
 
     return {
-        "verdict": verdict,
-        "probability": prob_real,
-        "confidence": round(abs(prob_real - 0.5) * 2.0, 3),
+        "verdict":       verdict,
+        "probability":   prob_real,
+        "confidence":    round(abs(prob_real - 0.5) * 2.0, 3),
         "signals": {
-            "source_credibility": round(source_credibility, 2),
-            "sentiment_score": round(sentiment, 2),
-            "clickbait_score": round(clickbait, 2),
-            "viral_index": round(viral_index, 2),
+            "source_credibility": round(credibility, 2),
+            "sentiment_score":     round(sentiment, 2),
+            "clickbait_score":     round(clickbait, 2),
+            "viral_index":         round(viral, 2),
         },
-        "search_query": support.get("generated_query", ""),
-        "evidence": evidence,
+        "search_query":  support.get("generated_query", ""),
+        "evidence":      evidence,
         "model_breakdown": {
             "xgboost": prob_real,
             "bayesian": prob_real,
         },
     }
 
-PIPELINE_STEPS = [
-    ("🧬","Semantic Embedding",     2),
-    ("📡","Signal Extraction",      0.5),
-    ("🤖","XGBoost + Bayesian",     2),
-    ("🔎","LLM Query Generation",   8),
-    ("🌐","Web Search",             2),
-    ("📋","Evidence Summarisation", 5),
-]
-
-def build_pipeline_html(done_up_to):
-    html = '<div class="pipeline-wrap">'
-    html += '<div class="pipeline-running-label"><span class="blink"></span>Running analysis pipeline</div>'
-    html += '<div class="pipeline-track">'
-    for i,(icon,name,_) in enumerate(PIPELINE_STEPS):
-        if i < done_up_to:
-            dot,nc,st_ = "done","done-name",'<span class="step-status done-label">✓ done</span>'
-        elif i == done_up_to:
-            dot,nc,st_ = "active","active-name",'<span class="step-status active-label">● running</span>'
-        else:
-            dot,nc,st_ = "pending","",""
-        html += f'<div class="pipeline-step"><div class="step-dot {dot}">{icon}</div><div class="step-info"><div class="step-name {nc}">{name}</div></div>{st_}</div>'
-    html += "</div></div>"
-    return html
-
-def ring_svg(pct, color, size=72):
-    r=26; circ=2*3.14159*r; filled=circ*pct; gap=circ-filled
-    return f'<svg width="{size}" height="{size}" viewBox="0 0 72 72"><circle cx="36" cy="36" r="{r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="5"/><circle cx="36" cy="36" r="{r}" fill="none" stroke="{color}" stroke-width="5" stroke-dasharray="{filled:.1f} {gap:.1f}" stroke-dashoffset="{circ/4:.1f}" stroke-linecap="round"/></svg>'
 
 def chip_color(key, val):
-    if key == "source_credibility": return f"hsl({int(val*120)},80%,55%)"
-    if key == "clickbait_score":    return f"hsl({int((1-val)*120)},80%,55%)"
+    if key == "source_credibility": return f"hsl({int(val*120)},75%,55%)"
+    if key == "clickbait_score":    return f"hsl({int((1-val)*120)},75%,55%)"
     return "#00C8FF"
 
-# ════════════════════════════════
+
+# ─────────────────────────────────────────────
 #  HEADER
-# ════════════════════════════════
+# ─────────────────────────────────────────────
 st.markdown("""
 <div class="tn-header">
   <div class="tn-logo-row">
@@ -453,148 +573,276 @@ st.markdown("""
     <span class="tn-brand">TruthNet</span>
     <span class="tn-version">v1.0</span>
   </div>
-  <div class="tn-tagline">AI-powered fake news verification · Semantic analysis + web-grounded explainability</div>
+  <div class="tn-tagline">AI-powered fake news verification — semantic analysis + web-grounded explainability</div>
 </div>
 """, unsafe_allow_html=True)
 
-# ════════════════════════════════
-#  CENTER via flanking columns
-# ════════════════════════════════
-_, center, _ = st.columns([1, 4, 1])
+# ─────────────────────────────────────────────
+#  MAIN CONTENT (centered column)
+# ─────────────────────────────────────────────
+_, col, _ = st.columns([1, 4, 1])
+with col:
 
-with center:
-    st.markdown("<div style='height:36px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
 
-    # ── INPUT BLOCK ──
+    # ── SECTION 01: INPUT ──────────────────────
     st.markdown('<div class="tn-section-label">01 · News Signal Input</div>', unsafe_allow_html=True)
 
-    headline = st.text_area("Headline", placeholder="Paste or type the news headline you want to verify…", height=110, key="headline_input")
+    # Example headlines
+    st.markdown('<div class="examples-label">Try an example</div>', unsafe_allow_html=True)
+    pill_cols = st.columns(len(EXAMPLE_HEADLINES))
+    for idx, (desc, title, dom, tweets) in enumerate(EXAMPLE_HEADLINES):
+        with pill_cols[idx]:
+            if st.button(f"▶ {desc}", key=f"ex_{idx}", help=title):
+                st.session_state.ex_selected = (title, dom, tweets)
+
+    # Input fields
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="tn-input-card">', unsafe_allow_html=True)
+
+    ex = st.session_state.get("ex_selected")
+    default_h = ex[0] if ex else ""
+    default_d = ex[1] if ex else ""
+    default_t = ex[2] if ex else 0
+
+    headline = st.text_area(
+        "Headline",
+        value=default_h,
+        placeholder="Paste or type the news headline you want to verify…",
+        height=100,
+        key="headline_input",
+    )
     c1, c2 = st.columns([2, 1], gap="medium")
     with c1:
-        source = st.text_input("Source / Domain", placeholder="e.g. reuters.com", key="source_input")
+        source = st.text_input(
+            "Source / Domain",
+            value=default_d,
+            placeholder="e.g. reuters.com",
+            key="source_input",
+        )
     with c2:
-        tweet_count = st.number_input("Tweet Count", min_value=0, max_value=10_000_000, value=0, step=500, key="tweet_input")
+        tweet_count = st.number_input(
+            "Tweet Count",
+            min_value=0, max_value=10_000_000,
+            value=default_t,
+            step=100,
+            key="tweet_input",
+        )
 
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-    analyze_btn = st.button("⚡  Analyze Headline", key="analyze_btn")
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    btn_col, reset_col = st.columns([3, 1], gap="small")
+    with btn_col:
+        analyze_btn = st.button("⚡  Analyze Headline", key="analyze_btn")
+    with reset_col:
+        clear_btn = st.button("Clear", key="clear_btn")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── PIPELINE ANIMATION (runs on button click, before rerun) ──
-    if analyze_btn:
-        if not headline.strip():
-            st.warning("Please enter a headline to analyze.")
-        else:
-            st.session_state.result = None
-            st.markdown('<div class="tn-divider"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="tn-section-label">02 · Analysis Pipeline</div>', unsafe_allow_html=True)
-            pipeline_ph = st.empty()
-            for step_idx in range(len(PIPELINE_STEPS)):
-                pipeline_ph.markdown(build_pipeline_html(step_idx), unsafe_allow_html=True)
-                time.sleep(PIPELINE_STEPS[step_idx][2])
-            with st.spinner("Running backend pipeline..."):
-                result = run_analysis(headline.strip(), source.strip() or "unknown", tweet_count)
-            pipeline_ph.markdown(build_pipeline_html(len(PIPELINE_STEPS)), unsafe_allow_html=True)
-            time.sleep(0.35)
-            st.session_state.result = result
-            st.session_state.history.append({"headline":headline.strip(),"verdict":result["verdict"],"probability":result["probability"]})
-            st.rerun()
+    if clear_btn:
+        st.session_state.ex_selected = None
+        st.session_state.result = None
+        st.rerun()
 
-    # ── RECENT CHECKS ──
+    # ── RUN PIPELINE ──────────────────────────
+    if analyze_btn and headline.strip():
+        st.session_state.result = None
+        st.session_state.run_step = 0
+        st.session_state.run_done = False
+        st.session_state.run_result = None
+        st.session_state.run_error = None
+
+        st.markdown('<div class="tn-divider"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="tn-section-label">02 · Analysis Pipeline</div>', unsafe_allow_html=True)
+        prog_ph  = st.empty()
+        step_ph  = st.empty()
+
+        # kick off background thread
+        res_holder = [None]
+        err_holder = [None]
+
+        def _bg():
+            try:
+                res_holder[0] = run_analysis(
+                    headline.strip(),
+                    source.strip() or "unknown",
+                    int(tweet_count),
+                )
+            except Exception as e:
+                err_holder[0] = e
+
+        _t = threading.Thread(target=_bg, daemon=True)
+        _t.start()
+
+        total_steps = len(PIPELINE_STEPS)
+        step_dur    = [0.4, 0.3, 0.6, 0.9, 0.7, 0.9]   # seconds per step
+        elapsed     = 0.0
+        step_idx    = 0
+
+        # Animate through steps based on real elapsed time
+        while _t.is_alive():
+            _time.sleep(0.06)
+            elapsed += 0.06
+            # determine which step we're on
+            cum = 0
+            for si, dur in enumerate(step_dur):
+                cum += dur
+                if elapsed < cum:
+                    step_idx = si
+                    break
+            else:
+                step_idx = total_steps - 1
+
+            prog_pct = min(elapsed / (sum(step_dur) + 0.5), 0.92)
+            prog_ph.progress(prog_pct, text=f"Step {step_idx+1}/{total_steps} — {PIPELINE_STEPS[step_idx][1]}…")
+            step_ph.markdown(pipeline_html(step_idx, total_steps), unsafe_allow_html=True)
+
+        _t.join()
+
+        if err_holder[0]:
+            st.error(f"Analysis failed: {err_holder[0]}")
+            st.stop()
+
+        result = res_holder[0]
+
+        step_ph.markdown(pipeline_html(total_steps, total_steps), unsafe_allow_html=True)
+        prog_ph.progress(1.0, text="✓ Complete")
+
+        st.session_state.result = result
+        st.session_state.history.append({
+            "headline":   headline.strip()[:80],
+            "verdict":    result["verdict"],
+            "probability": result["probability"],
+        })
+        st.session_state.ex_selected = None
+        st.rerun()
+
+    # ── RECENT CHECKS ──────────────────────────
     if st.session_state.history:
         st.markdown('<div class="tn-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="tn-section-label">Recent Checks</div>', unsafe_allow_html=True)
-        for item in st.session_state.history[-4:][::-1]:
-            cls  = item["verdict"].lower()
-            disp = f"{round(item['probability']*100)}% real"
-            hl_s = (item["headline"][:70]+"…") if len(item["headline"])>70 else item["headline"]
-            st.markdown(f'<div class="recent-item"><div class="recent-badge {cls}"></div><span class="recent-headline">{hl_s}</span><span class="recent-prob {cls}">{disp}</span></div>', unsafe_allow_html=True)
+        for item in st.session_state.history[-5:][::-1]:
+            cls = item["verdict"].lower()
+            disp = f'{round(item["probability"]*100)}% real'
+            st.markdown(
+                f'<div class="tn-recent-item">'
+                f'<div class="tn-dot {cls}"></div>'
+                f'<span class="tn-recent-hl">{item["headline"]}</span>'
+                f'<span class="tn-recent-pct {cls}">{disp}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-    # ── RESULTS ──
+    # ── RESULTS ────────────────────────────────
     res = st.session_state.result
     if res is not None:
-        verdict   = res["verdict"]
-        prob      = res["probability"]
-        conf      = res["confidence"]
-        vclass    = verdict.lower()
-        color     = "#00E896" if verdict=="REAL" else "#FF3366"
-        emoji     = "✅" if verdict=="REAL" else "🚨"
-        fake_prob = round(1-prob, 3)
-        mb        = res["model_breakdown"]
-
         st.markdown('<div class="tn-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="tn-section-label">03 · Verdict &amp; Evidence</div>', unsafe_allow_html=True)
 
-        # Verdict card
-        st.markdown(f"""
-<div class="verdict-card verdict-{vclass}">
-  <div class="verdict-inner">
-    <div class="verdict-text-block">
-      <div class="verdict-label {vclass}">◉ VERDICT</div>
-      <div class="verdict-title {vclass}">{emoji} {verdict}</div>
-      <div class="verdict-subtitle">{"Story appears factual — high credibility signals detected." if verdict=="REAL" else "Likely misinformation — multiple deception signals flagged."}</div>
-    </div>
-    <div style="text-align:right;flex-shrink:0">
-      {ring_svg(prob, color)}
-      <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:{color};margin-top:6px">{round(prob*100,1)}% real</div>
-    </div>
-  </div>
-</div>""", unsafe_allow_html=True)
+        verdict  = res["verdict"]
+        prob     = res["probability"]
+        conf     = res["confidence"]
+        vclass   = verdict.lower()
+        color    = "#00E896" if verdict == "REAL" else "#FF3366"
+        emoji    = "✅" if verdict == "REAL" else "🚨"
+        fake_p   = round(1 - prob, 3)
+        mb       = res["model_breakdown"]
+        sig_lbl  = {
+            "source_credibility": "Source Trust",
+            "sentiment_score":     "Sentiment",
+            "clickbait_score":     "Clickbait",
+            "viral_index":         "Viral Index",
+        }
 
-        # Prob bars + model breakdown
-        st.markdown(f"""
-<div class="two-col">
-  <div class="two-col-panel">
-    <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:#475569;text-transform:uppercase;margin-bottom:14px">Probability Breakdown</div>
-    <div class="prob-bar-wrap">
-      <div class="prob-bar-label"><span style="color:#00E896">REAL</span><span style="color:#94A3B8">{round(prob*100,1)}%</span></div>
-      <div class="prob-bar-bg"><div class="prob-bar-fill real" style="width:{prob*100:.1f}%"></div></div>
-    </div>
-    <div class="prob-bar-wrap">
-      <div class="prob-bar-label"><span style="color:#FF3366">FAKE</span><span style="color:#94A3B8">{round(fake_prob*100,1)}%</span></div>
-      <div class="prob-bar-bg"><div class="prob-bar-fill fake" style="width:{fake_prob*100:.1f}%"></div></div>
-    </div>
-    <div style="margin-top:14px;font-family:'Space Mono',monospace;font-size:9px;color:#475569;letter-spacing:1px">
-      MODEL CONFIDENCE &nbsp;<span style="color:#94A3B8;font-size:13px;font-family:'Syne',sans-serif;font-weight:700">{round(conf*100,1)}%</span>
-    </div>
-  </div>
-  <div class="two-col-panel" style="display:flex;flex-direction:column;gap:8px">
-    <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1.5px;color:#475569;text-transform:uppercase;margin-bottom:4px">Model Breakdown</div>
-    <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-family:'Space Mono',monospace;font-size:10px;color:#475569">XGBoost</span>
-        <span style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:{color}">{round(mb['xgboost']*100,1)}%</span>
-      </div>
-      <div style="height:1px;background:rgba(255,255,255,0.05)"></div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-family:'Space Mono',monospace;font-size:10px;color:#475569">Bayesian</span>
-        <span style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:{color}">{round(mb['bayesian']*100,1)}%</span>
-      </div>
-    </div>
-  </div>
-</div>""", unsafe_allow_html=True)
+        # Verdict card
+        st.markdown(
+            f'<div class="tn-verdict {vclass}">'
+            f'<div class="tn-verdict-inner">'
+            f'<div class="tn-verdict-text">'
+            f'<div class="tn-verdict-eyebrow {vclass}">◉ VERDICT</div>'
+            f'<div class="tn-verdict-title {vclass}">{emoji} {verdict}</div>'
+            f'<div class="tn-verdict-sub">'
+            f'{"High credibility signals — story appears factual." if verdict=="REAL" else "Multiple deception signals detected — likely misinformation."}'
+            f'</div>'
+            f'</div>'
+            f'<div class="ring-wrap">'
+            f'{ring_svg(prob, color)}'
+            f'<div class="ring-pct" style="color:{color}">{round(prob*100,1)}% real</div>'
+            f'</div>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Two-col: probabilities + model breakdown
+        st.markdown(f'<div class="tn-two-col">', unsafe_allow_html=True)
+
+        # Left: probability bars
+        st.markdown(
+            '<div class="tn-panel">'
+            '<div class="panel-label">Probability</div>'
+            f'<div class="prob-row"><div class="prob-row-head"><span style="color:#00E896">REAL</span><span style="color:#94A3B8">{round(prob*100,1)}%</span></div>'
+            f'<div class="prob-bar-bg"><div class="prob-bar-fill real" style="width:{prob*100:.1f}%"></div></div></div>'
+            f'<div class="prob-row"><div class="prob-row-head"><span style="color:#FF3366">FAKE</span><span style="color:#94A3B8">{round(fake_p*100,1)}%</span></div>'
+            f'<div class="prob-bar-bg"><div class="prob-bar-fill fake" style="width:{fake_p*100:.1f}%"></div></div></div>'
+            f'<div style="margin-top:14px;font-size:9px;color:#475569;font-family:\'Space Mono\',monospace;letter-spacing:1px">'
+            f'CONFIDENCE &nbsp;<span style="color:#94A3B8;font-size:12px;font-family:\'Syne\',sans-serif;font-weight:700">{round(conf*100,1)}%</span>'
+            f'</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Right: model breakdown
+        st.markdown(
+            '<div class="tn-panel">'
+            '<div class="panel-label">Model Breakdown</div>'
+            f'<div class="model-row"><span class="model-key">XGBoost</span><span class="model-val" style="color:{color}">{round(mb["xgboost"]*100,1)}%</span></div>'
+            f'<div class="model-row"><span class="model-key">Bayesian Net</span><span class="model-val" style="color:{color}">{round(mb["bayesian"]*100,1)}%</span></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('</div>', unsafe_allow_html=True)  # close two-col
 
         # Signal chips
-        st.markdown('<div class="tn-section-label" style="margin-bottom:14px">Extracted Signals</div>', unsafe_allow_html=True)
-        sig_labels = {"source_credibility":"Source Trust","sentiment_score":"Sentiment","clickbait_score":"Clickbait","viral_index":"Viral Index"}
-        chips_html = '<div class="signal-grid">'
-        for key, val in res["signals"].items():
-            c = chip_color(key, val)
-            chips_html += f'<div class="signal-chip"><div class="signal-chip-name">{sig_labels.get(key,key)}</div><div class="signal-chip-bar"><div class="signal-chip-fill" style="width:{val*100:.0f}%;background:{c}"></div></div><div class="signal-chip-val" style="color:{c}">{val:.2f}</div></div>'
-        chips_html += "</div>"
-        st.markdown(chips_html, unsafe_allow_html=True)
+        st.markdown('<div class="tn-section-label" style="margin-bottom:12px">Extracted Signals</div>', unsafe_allow_html=True)
+        chips = '<div class="tn-chips">'
+        for k, v in res["signals"].items():
+            c = chip_color(k, v)
+            chips += (
+                f'<div class="tn-chip">'
+                f'<div class="tn-chip-name">{sig_lbl.get(k, k)}</div>'
+                f'<div class="tn-chip-bar"><div class="tn-chip-fill" style="width:{v*100:.0f}%;background:{c}"></div></div>'
+                f'<div class="tn-chip-val" style="color:{c}">{v:.2f}</div>'
+                f'</div>'
+            )
+        chips += '</div>'
+        st.markdown(chips, unsafe_allow_html=True)
 
         # Search query
-        st.markdown(f'<div class="query-badge"><div style="font-size:16px;flex-shrink:0">🔎</div><div><div class="query-badge-label">LLM-generated Search Query</div><div class="query-badge-text">{res["search_query"]}</div></div></div>', unsafe_allow_html=True)
+        sq = res.get("search_query", "")
+        if sq:
+            st.markdown(
+                f'<div class="tn-query">'
+                f'<div class="tn-query-icon">🔎</div>'
+                f'<div><div class="tn-query-label">LLM-generated Query</div>'
+                f'<div class="tn-query-text">{sq}</div></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
         # Evidence
-        st.markdown('<div class="tn-section-label" style="margin-bottom:14px">Web-Grounded Evidence</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tn-section-label" style="margin-bottom:12px">Web-Grounded Evidence</div>', unsafe_allow_html=True)
         for ev in res["evidence"]:
-            tag = "SUPPORTS" if ev["type"]=="support" else "CONTRADICTS"
-            st.markdown(f'<div class="evidence-card {ev["type"]}"><span class="evidence-card-tag">{tag}</span><div class="evidence-card-source">{ev["source"]}</div><div class="evidence-card-text">{ev["text"]}</div></div>', unsafe_allow_html=True)
+            tag = "SUPPORTS" if ev["type"] == "support" else "CONTRADICTS"
+            st.markdown(
+                f'<div class="ev-card {ev["type"]}">'
+                f'<span class="ev-tag {ev["type"]}">{tag}</span>'
+                f'<div class="ev-source">{ev["source"]}</div>'
+                f'<div class="ev-text">{ev["text"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-        if st.button("🔄  New Analysis", key="reset_btn"):
-            st.session_state.result = None
-            st.rerun()
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        st.button("🔄  Analyze Another", key="reset_btn")
 
-    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:50px'></div>", unsafe_allow_html=True)
