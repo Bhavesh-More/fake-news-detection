@@ -54,7 +54,7 @@ def build_support_with_llm(title, domain, ml_result):
     ]
 
     first = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
+        model="llama-3.1-8b-instant",
         messages=first_messages,
         tools=tools,
         tool_choice="auto",
@@ -89,7 +89,6 @@ def build_support_with_llm(title, domain, ml_result):
             {
                 "role": "tool",
                 "tool_call_id": call.id,
-                "name": "tavily_search",
                 "content": json.dumps(search_results),
             },
             {

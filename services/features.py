@@ -44,8 +44,7 @@ def fact_signal(nlp, text):
     return int("PERSON" in entities or "ORG" in entities or "GPE" in entities)
 
 
-def build_feature_payload(bundle, title, domain_url, tweet_count):
-    domain = normalize_domain(domain_url)
+def build_feature_payload(bundle, title, domain, tweet_count):
     tweets = int(tweet_count)
 
     credibility = float(bundle["domain_scores"].get(domain, 0.5))
